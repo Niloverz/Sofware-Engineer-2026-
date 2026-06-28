@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ryan_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ""
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+    ports:
+      - "35005:3306"
+    volumes:
+      - ryan_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ryan_rabbitmq
+    restart: unless-stopped
+    ports:
+      - "35006:5672"
+      - "35007:15672"
+    volumes:
+      - ryan_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build: ./user-service
+    container_name: ryan_user
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_NAME: user_db
+      JWT_SECRET: ryan_secret_key_2026
+    ports:
+      - "35001:3001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  order-service:
+    build: ./order-service
+    container_name: ryan_order
+    restart: unless-stopped
+    environment:
+      PORT: 3002
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_NAME: order_db
+      JWT_SECRET: ryan_secret_key_2026
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    ports:
+      - "35002:3002"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  notification-service:
+    build: ./notification-service
+    container_name: ryan_notification
+    restart: unless-stopped
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      ORDER_SERVICE_URL: http://order-service:3002
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      order-service:
+        condition: service_started
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: ryan_gateway
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      JWT_SECRET: ryan_secret_key_2026
+      USER_SERVICE_URL: http://user-service:3001
+      ORDER_SERVICE_URL: http://order-service:3002
+    ports:
+      - "35000:3000"
+    depends_on:
+      - user-service
+      - order-service
+
+volumes:
+  ryan_mysql_data:
+  ryan_rabbitmq_data:
